@@ -15,6 +15,7 @@ import * as secp256k1 from 'secp256k1'
 import libhsmd from './libhsmd'
 import { get_greenlight_grpc_uri } from './greenlight'
 import { Req } from '../types'
+import {receiveError} from "../controllers/messages";
 
 // var protoLoader = require('@grpc/proto-loader')
 const config = loadConfig()
@@ -402,7 +403,8 @@ export function loadRouter(): any {
 const MAX_MSG_LENGTH = 972 // 1146 - 20 ???
 export async function keysendMessage(
   opts: KeysendOpts,
-  ownerPubkey?: string
+  ownerPubkey?: string,
+  tenant?: number
 ): Promise<interfaces.SendPaymentResponse> {
   sphinxLogger.info('keysendMessage', logging.Lightning)
   return new Promise(async function (resolve, reject) {
@@ -444,6 +446,7 @@ export async function keysendMessage(
         await sleep(432)
       } catch (e) {
         sphinxLogger.error(e)
+        receiveError(e,tenant);
         fail = true
       }
     }

@@ -473,6 +473,18 @@ export const receiveMessage = async (payload: Payload): Promise<void> => {
   sendConfirmation({ chat, sender: owner, msg_id, receiver: sender })
 }
 
+export const receiveError = async (message: string, tenant?: number): Promise<void> => {
+  sphinxLogger.info(`received error ${message}`);
+  if (!tenant) {
+    return sphinxLogger.error('no owner Id');
+  }
+
+  socket.sendJson({
+    type: 'error',
+    response: jsonUtils.errorToJson(message),
+  },tenant);
+}
+
 export const receiveBoost = async (payload: Payload): Promise<void> => {
   const {
     owner,

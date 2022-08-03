@@ -34,6 +34,16 @@ function messageToJson(msg, chat?, contact?) {
   })
 }
 
+function errorToJson(err: string) {
+  if (!err) return {}
+  const date = new Date();
+  date.setMilliseconds(0);
+  return toSnake( {
+    error: err,
+    date
+  })
+}
+
 function contactToJson(contact) {
   if (!contact) return {}
   return toSnake(contact.dataValues || contact)
@@ -67,4 +77,5 @@ export {
   subscriptionToJson,
   botToJson,
   accountingToJson,
+    errorToJson
 }

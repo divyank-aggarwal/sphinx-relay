@@ -254,7 +254,8 @@ export function signAndSend(
       } else {
         await LND.keysendMessage(
           { ...opts, data } as LND.KeysendOpts,
-          ownerPubkey
+          ownerPubkey,
+            ownerID
         )
       }
       resolve(true)
