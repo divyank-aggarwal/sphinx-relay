@@ -587,7 +587,8 @@ export async function signer(req: Req, res) {
   try {
     const sig = await Lightning.signBuffer(
       Buffer.from(req.params.challenge, 'base64'),
-      req.owner.publicKey
+      req.owner.publicKey,
+        req.owner.id
     )
     const sigBytes = zbase32.decode(sig)
     const sigBase64 = urlBase64FromBytes(sigBytes)

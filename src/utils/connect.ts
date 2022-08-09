@@ -103,7 +103,8 @@ export async function checkPeered(req, res) {
     let peered = false
     let active = false
     let channel_point = ''
-    const peers = await Lightning.listPeers()
+    const tenant = req.owner?.id;
+    const peers = await Lightning.listPeers(undefined,undefined,tenant)
     peers.peers.forEach((p) => {
       if (p.pub_key === pubkey) peered = true
     })

@@ -15,7 +15,7 @@ import * as secp256k1 from 'secp256k1'
 import libhsmd from './libhsmd'
 import { get_greenlight_grpc_uri } from './greenlight'
 import { Req } from '../types'
-import {receiveError} from "../controllers/messages";
+import {receiveError} from "../utils/socket";
 
 // var protoLoader = require('@grpc/proto-loader')
 const config = loadConfig()
@@ -31,6 +31,25 @@ const FEE_LIMIT_SAT = 10000
 let lightningClient = <any>null
 let walletUnlocker = <any>null
 let routerClient = <any>null
+
+export enum ErrorType {
+  LIST_PAYMENTS = 'list_payments',
+  LIST_INVOICES = 'list_invoices',
+  SEND_PAYMENT = 'send_payment',
+  SEND_KEYSEND = 'send_keysend',
+  QUERY_ROUTES = 'query_routes',
+  SIGN_MESSAGE = 'sign_message',
+  VERIFY_MESSAGE = 'verify_message',
+  GET_INFO = 'get_info',
+  ADD_INVOICE = 'add_invoice',
+  LIST_PEERS = 'list_peers',
+  LIST_CHANNELS = 'list_channels',
+  PENDING_CHANNELS = 'pending_channels',
+  CONNECT_PEER = 'connect_peer',
+  OPEN_CHANNEL = 'open_channel',
+  CHANNEL_BALANCE = 'channel_balance',
+  CHANNEL_INFO = 'channel_info'
+}
 
 export function loadCredentials(macName?: string): grpc.ChannelCredentials {
   try {
@@ -162,7 +181,8 @@ export async function queryRoute(
   pub_key: string,
   amt: number,
   route_hint?: string,
-  ownerPubkey?: string
+  ownerPubkey?: string,
+  tenant?: number
 ): Promise<QueryRouteResponse> {
   sphinxLogger.info('queryRoute', logging.Lightning)
   if (IS_GREENLIGHT) {
@@ -188,6 +208,7 @@ export async function queryRoute(
     lightning.queryRoutes(options, (err, response) => {
       if (err) {
         reject(err)
+        receiveError(err,ErrorType.QUERY_ROUTES,tenant)
         return
       }
       resolve(response)
@@ -222,7 +243,8 @@ export async function newAddress(
 // for paying invoice and invite invoice
 export async function sendPayment(
   payment_request: string,
-  ownerPubkey?: string
+  ownerPubkey?: string,
+  tenant?: number
 ): Promise<interfaces.SendPaymentResponse> {
   sphinxLogger.info('sendPayment', logging.Lightning)
   const lightning = await loadLightning(true, ownerPubkey) // try proxy
@@ -234,9 +256,11 @@ export async function sendPayment(
       }
       lightning.sendPaymentSync(opts, (err, response) => {
         if (err) {
+          receiveError(err,ErrorType.SEND_PAYMENT,tenant)
           reject(err)
         } else {
           if (response.payment_error) {
+            receiveError(response.payment_error,ErrorType.SEND_PAYMENT,tenant)
             reject(response.payment_error)
           } else {
             resolve(response)
@@ -254,6 +278,7 @@ export async function sendPayment(
             if (err == null) {
               resolve(interfaces.keysendResponse(response))
             } else {
+              receiveError(err,ErrorType.SEND_PAYMENT,tenant)
               reject(err)
             }
           }
@@ -262,12 +287,14 @@ export async function sendPayment(
         const call = lightning.sendPayment({ payment_request })
         call.on('data', async (response) => {
           if (response.payment_error) {
+            receiveError(response.payment_error,ErrorType.SEND_PAYMENT,tenant);
             reject(response.payment_error)
           } else {
             resolve(response)
           }
         })
         call.on('error', async (err) => {
+          receiveError(err,ErrorType.SEND_PAYMENT,tenant);
           reject(err)
         })
         call.write({ payment_request })
@@ -285,7 +312,8 @@ export interface KeysendOpts {
 }
 export function keysend(
   opts: KeysendOpts,
-  ownerPubkey?: string
+  ownerPubkey?: string,
+  tenant?: number
 ): Promise<interfaces.SendPaymentResponse> {
   sphinxLogger.info('keysend', logging.Lightning)
   return new Promise(async function (resolve, reject) {
@@ -329,9 +357,11 @@ export function keysend(
         const lightning = await loadLightning(true, ownerPubkey) // try proxy
         lightning.sendPaymentSync(options, (err, response) => {
           if (err) {
+            receiveError(err,ErrorType.SEND_KEYSEND,tenant)
             reject(err)
           } else {
             if (response.payment_error) {
+              receiveError(response.payment_error,ErrorType.SEND_KEYSEND,tenant)
               reject(response.payment_error)
             } else {
               resolve(response)
@@ -347,6 +377,7 @@ export function keysend(
             if (err == null) {
               resolve(interfaces.keysendResponse(response))
             } else {
+              receiveError(err,ErrorType.SEND_KEYSEND,tenant)
               reject(err)
             }
           })
@@ -360,13 +391,16 @@ export function keysend(
           call.on('data', function (payment) {
             const state = payment.status || payment.state
             if (payment.payment_error) {
+              receiveError(payment.payment_error,ErrorType.SEND_KEYSEND,tenant)
               reject(payment.payment_error)
             } else {
               if (state === 'IN_FLIGHT') {
                 // do nothing
               } else if (state === 'FAILED_NO_ROUTE') {
+                receiveError(payment.failure_reason,ErrorType.SEND_KEYSEND,tenant)
                 reject(payment.failure_reason || payment)
               } else if (state === 'FAILED') {
+                receiveError(payment.failure_reason,ErrorType.SEND_KEYSEND,tenant)
                 reject(payment.failure_reason || payment)
               } else if (state === 'SUCCEEDED') {
                 resolve(payment)
@@ -374,6 +408,7 @@ export function keysend(
             }
           })
           call.on('error', function (err) {
+            receiveError(err,ErrorType.SEND_KEYSEND,tenant)
             reject(err)
           })
           // call.write(options)
@@ -414,7 +449,7 @@ export async function keysendMessage(
 
     if (opts.data.length < MAX_MSG_LENGTH) {
       try {
-        const res = await keysend(opts, ownerPubkey)
+        const res = await keysend(opts, ownerPubkey,tenant)
         resolve(res)
       } catch (e) {
         reject(e)
@@ -440,13 +475,13 @@ export async function keysendMessage(
             amt, // split the amt too
             data: `${ts}_${i}_${n}_${m}`,
           },
-          ownerPubkey
+          ownerPubkey,
+            tenant
         )
         success = true
         await sleep(432)
       } catch (e) {
         sphinxLogger.error(e)
-        receiveError(e,tenant);
         fail = true
       }
     }
@@ -460,9 +495,10 @@ export async function keysendMessage(
 
 export async function signAscii(
   ascii: string,
-  ownerPubkey?: string
+  ownerPubkey?: string,
+  tenant?: number
 ): Promise<string> {
-  const sig = await signMessage(ascii_to_hexa(ascii), ownerPubkey)
+  const sig = await signMessage(ascii_to_hexa(ascii), ownerPubkey,tenant)
   return sig
 }
 
@@ -574,11 +610,11 @@ export function listAllPaymentsFull(): Promise<{ payments: interfaces.Payment[] 
 }
 
 // msg is hex
-export async function signMessage(msg: string, ownerPubkey?: string): Promise<string> {
-  return signBuffer(Buffer.from(msg, 'hex'), ownerPubkey)
+export async function signMessage(msg: string, ownerPubkey?: string,tenant?: number): Promise<string> {
+  return signBuffer(Buffer.from(msg, 'hex'), ownerPubkey,tenant)
 }
 
-export function signBuffer(msg: Buffer, ownerPubkey?: string): Promise<string> {
+export function signBuffer(msg: Buffer, ownerPubkey?: string, tenant?: number): Promise<string> {
   sphinxLogger.info('signBuffer', logging.Lightning)
   return new Promise(async (resolve, reject) => {
     try {
@@ -599,6 +635,7 @@ export function signBuffer(msg: Buffer, ownerPubkey?: string): Promise<string> {
         const options = { msg }
         lightning.signMessage(options, function (err, sig) {
           if (err || !sig.signature) {
+            receiveError(err,ErrorType.SIGN_MESSAGE,tenant)
             reject(err)
           } else {
             resolve(sig.signature)
@@ -627,7 +664,8 @@ export interface VerifyResponse {
 export function verifyMessage(
   msg: string,
   sig: string,
-  ownerPubkey?: string
+  ownerPubkey?: string,
+  tenant?: number
 ): Promise<VerifyResponse> {
   sphinxLogger.info('verifyMessage', logging.Lightning)
   return new Promise(async (resolve, reject) => {
@@ -672,6 +710,7 @@ export function verifyMessage(
         lightning.verifyMessage(options, function (err, res) {
           // console.log(res)
           if (err || !res.pubkey) {
+            receiveError(err,ErrorType.VERIFY_MESSAGE,tenant)
             reject(err)
           } else {
             resolve(res)
@@ -686,15 +725,17 @@ export function verifyMessage(
 export async function verifyAscii(
   ascii: string,
   sig: string,
-  ownerPubkey?: string
+  ownerPubkey?: string,
+  tenant?: number
 ): Promise<VerifyResponse> {
-  const r = await verifyMessage(ascii_to_hexa(ascii), sig, ownerPubkey)
+  const r = await verifyMessage(ascii_to_hexa(ascii), sig, ownerPubkey,tenant)
   return r
 }
 
 export async function getInfo(
   tryProxy?: boolean,
-  noCache?: boolean
+  noCache?: boolean,
+  tenant?: number
 ): Promise<interfaces.GetInfoResponse> {
   // log('getInfo')
   return new Promise(async (resolve, reject) => {
@@ -712,6 +753,7 @@ export async function getInfo(
         }
       })
     } catch (e) {
+      receiveError(e,ErrorType.GET_INFO,tenant)
       reject(e)
     }
   })
@@ -719,7 +761,8 @@ export async function getInfo(
 
 export async function addInvoice(
   request: interfaces.AddInvoiceRequest,
-  ownerPubkey?: string
+  ownerPubkey?: string,
+  tenant?: number
 ): Promise<interfaces.AddInvoiceResponse> {
   // log('addInvoice')
   return new Promise(async (resolve, reject) => {
@@ -730,6 +773,7 @@ export async function addInvoice(
       if (err == null) {
         resolve(interfaces.addInvoiceResponse(response))
       } else {
+        receiveError(err,ErrorType.ADD_INVOICE,tenant)
         reject(err)
       }
     })
@@ -738,9 +782,10 @@ export async function addInvoice(
 
 export async function listPeers(
   args?: interfaces.ListPeersArgs,
-  ownerPubkey?: string
+  ownerPubkey?: string,
+  tenant?:number
 ): Promise<interfaces.ListPeersResponse> {
-  sphinxLogger.info('listChannels', logging.Lightning)
+  sphinxLogger.info('listPeers', logging.Lightning)
   return new Promise(async (resolve, reject) => {
     const lightning = await loadLightning(true, ownerPubkey)
     const opts = interfaces.listPeersRequest(args)
@@ -748,6 +793,7 @@ export async function listPeers(
       if (err == null) {
         resolve(interfaces.listPeersResponse(response))
       } else {
+        receiveError(err,ErrorType.LIST_PEERS,tenant)
         reject(err)
       }
     })
@@ -756,7 +802,8 @@ export async function listPeers(
 
 export async function listChannels(
   args?: interfaces.ListChannelsArgs,
-  ownerPubkey?: string
+  ownerPubkey?: string,
+  tenant?: number
 ): Promise<interfaces.ListChannelsResponse> {
   sphinxLogger.info('listChannels', logging.Lightning)
   return new Promise(async (resolve, reject) => {
@@ -767,6 +814,7 @@ export async function listChannels(
       if (err == null) {
         resolve(interfaces.listChannelsResponse(response))
       } else {
+        receiveError(err,ErrorType.LIST_CHANNELS,tenant)
         reject(err)
       }
     })
@@ -774,7 +822,8 @@ export async function listChannels(
 }
 
 export async function pendingChannels(
-  ownerPubkey?: string
+  ownerPubkey?: string,
+  tenant?: number
 ): Promise<{ [k: string]: any }> {
   sphinxLogger.info('pendingChannels', logging.Lightning)
   if (IS_GREENLIGHT) return []
@@ -784,6 +833,7 @@ export async function pendingChannels(
       if (err == null) {
         resolve(response)
       } else {
+        receiveError(err,ErrorType.PENDING_CHANNELS,tenant)
         reject(err)
       }
     })
@@ -840,10 +890,11 @@ interface ComplexBalances {
   full_balance: number
 }
 export async function complexBalances(
-  ownerPubkey?: string
+  ownerPubkey?: string,
+  tenant?: number
 ): Promise<ComplexBalances> {
   sphinxLogger.info('complexBalances', logging.Lightning)
-  const channelList = await listChannels({}, ownerPubkey)
+  const channelList = await listChannels({}, ownerPubkey,tenant)
   const { channels } = channelList
   if (IS_GREENLIGHT) {
     const local_balance = channels.reduce(
@@ -865,7 +916,7 @@ export async function complexBalances(
       (a, chan) => a + Math.max(0, parseInt(chan.local_balance) - parseInt(chan.local_chan_reserve_sat)),
       0
     )
-    const response = await channelBalance(ownerPubkey)
+    const response = await channelBalance(ownerPubkey,tenant)
     return <ComplexBalances>{
       reserve,
       full_balance: Math.max(0, parseInt(response.balance)),
@@ -876,7 +927,8 @@ export async function complexBalances(
 }
 
 export async function channelBalance(
-  ownerPubkey?: string
+  ownerPubkey?: string,
+  tenant?: number
 ): Promise<{ [k: string]: any }> {
   sphinxLogger.info('channelBalance', logging.Lightning)
   return new Promise(async (resolve, reject) => {
@@ -885,6 +937,7 @@ export async function channelBalance(
       if (err == null) {
         resolve(response)
       } else {
+        receiveError(err,ErrorType.CHANNEL_BALANCE,tenant)
         reject(err)
       }
     })

@@ -240,7 +240,7 @@ export function signAndSend(
     let data = JSON.stringify(opts.data || {})
     opts.amt = opts.amt || 0
 
-    const sig = await LND.signAscii(data, ownerPubkey)
+    const sig = await LND.signAscii(data, ownerPubkey,ownerID.toNumber())
     data = data + sig
 
     // console.log("-> ACTUALLY SEND: topic:", mqttTopic)

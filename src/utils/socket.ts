@@ -5,7 +5,8 @@ import { loadConfig } from './config'
 import { sphinxLogger } from '../utils/logger'
 import { generateTransportTokenKeys } from '../utils/cert'
 import * as rsa from '../crypto/rsa'
-
+import * as jsonUtils from "./json";
+import {ErrorType} from "../grpc/lightning";
 const config = loadConfig()
 // import * as WebSocket from 'ws'
 
@@ -117,4 +118,17 @@ export const send = (body, tenant) => {
 
 export const sendJson = (object, tenant: number) => {
   send(JSON.stringify(object), tenant)
+}
+
+export const receiveError = async (message: string, method: ErrorType, tenant?: number): Promise<void> => {
+  sphinxLogger.info(`received error ${message}`);
+  if (!tenant) {
+    return sphinxLogger.error('no owner Id');
+  }
+
+  sendJson({
+    type: 'error',
+    response: jsonUtils.errorToJson(message),
+    method: method
+  },tenant);
 }

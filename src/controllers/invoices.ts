@@ -41,7 +41,8 @@ export const payInvoice = async (req: Req, res: Response): Promise<void> => {
   try {
     const response = await Lightning.sendPayment(
       payment_request,
-      req.owner.publicKey
+      req.owner.publicKey,
+        req.owner.id
     )
 
     sphinxLogger.info(`[pay invoice data] ${response}`)
@@ -153,7 +154,7 @@ export const createInvoice = async (req: Req, res: Response): Promise<void> => {
     res.end()
   } else {
     try {
-      const response = await Lightning.addInvoice(request, req.owner.publicKey)
+      const response = await Lightning.addInvoice(request, req.owner.publicKey,req.owner.id)
       const { payment_request } = response
 
       if (!contact_id && !chat_id) {

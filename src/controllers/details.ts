@@ -39,7 +39,8 @@ export const checkRoute = async (req: Req, res) => {
       pubkey as string,
       amt,
       (route_hint as string) || '',
-      owner.publicKey
+      owner.publicKey,
+        owner.id
     )
     success(res, r)
   } catch (e) {
@@ -85,7 +86,8 @@ export const checkRouteByContactOrChat = async (req: Req, res) => {
       pubkey,
       amt,
       routeHint || '',
-      owner.publicKey
+      owner.publicKey,
+        owner.id
     )
     success(res, r)
   } catch (e) {
@@ -124,7 +126,7 @@ export const getLightningInfo = async (req: Req, res) => {
   if (!req.owner) return failure(res, 'no owner')
   res.status(200)
   try {
-    const response = await Lightning.getInfo()
+    const response = await Lightning.getInfo(undefined,undefined,req.owner.id);
     res.json({ success: true, response })
   } catch (e) {
     res.json({ success: false })
@@ -137,7 +139,7 @@ export const getChannels = async (req: Req, res) => {
 
   res.status(200)
   try {
-    const response = await Lightning.listChannels({})
+    const response = await Lightning.listChannels({},undefined,req.owner.id)
     res.json({ success: true, response })
   } catch (err) {
     res.json({ success: false })
@@ -156,7 +158,7 @@ export const getBalance = async (req: Req, res) => {
 
   res.status(200)
   try {
-    const blcs = await Lightning.complexBalances(owner.publicKey)
+    const blcs = await Lightning.complexBalances(owner.publicKey,tenant)
     res.json({
       success: true,
       response: blcs,
@@ -172,7 +174,7 @@ export const getLocalRemoteBalance = async (req: Req, res) => {
   if (!req.owner) return failure(res, 'no owner')
   res.status(200)
   try {
-    const channelList = await Lightning.listChannels({}, req.owner.publicKey)
+    const channelList = await Lightning.listChannels({}, req.owner.publicKey,req.owner.id)
     const { channels } = channelList
 
     const localBalances: number[] = channels.map((c) =>
